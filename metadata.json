@@ -1,0 +1,6 @@
+{
+  "name": "ANHAD DAS - Luxury Indian Dining & Celebrations",
+  "description": "Where Indian Flavours Meet Timeless Celebrations. A luxury Indian dining destination for authentic cuisine, family gatherings, private parties, and milestone celebrations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
