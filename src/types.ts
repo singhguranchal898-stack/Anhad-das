@@ -54,6 +54,12 @@ export interface Reservation {
   specialRequest?: string;
   status: 'confirmed' | 'pending' | 'cancelled';
   createdAt: string;
+  supabaseSyncStatus?: {
+    success: boolean;
+    table?: string;
+    error?: string;
+    isPermissionError?: boolean;
+  };
 }
 
 export type EventType = 
@@ -79,6 +85,12 @@ export interface EventBooking {
   message?: string;
   status: 'received' | 'reviewing' | 'confirmed';
   createdAt: string;
+  supabaseSyncStatus?: {
+    success: boolean;
+    table?: string;
+    error?: string;
+    isPermissionError?: boolean;
+  };
 }
 
 export interface ContactMessage {

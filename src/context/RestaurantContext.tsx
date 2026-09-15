@@ -16,6 +16,7 @@ import {
   insertContactMessageToSupabase,
   fetchAppointmentsFromSupabase,
   fetchReservationsFromSupabase,
+  testSupabaseAppointmentsConnection,
   SUPABASE_URL
 } from '../lib/supabase';
 
@@ -33,6 +34,11 @@ interface RestaurantContextType {
     connected: boolean;
     projectId: string;
     lastSyncedTable: string | null;
+    lastSyncSuccess: boolean | null;
+    lastSyncError: string | null;
+    isChecking: boolean;
+    checkConnection: () => Promise<{ ok: boolean; message: string }>;
+    retrySyncBooking: (bookingId: string) => Promise<boolean>;
   };
 
   // Favourites
@@ -188,11 +194,86 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     connected: boolean;
     projectId: string;
     lastSyncedTable: string | null;
+    lastSyncSuccess: boolean | null;
+    lastSyncError: string | null;
+    isChecking: boolean;
   }>({
     connected: true,
     projectId: 'gcyobblqgyxnujfxgcfi',
     lastSyncedTable: null,
+    lastSyncSuccess: null,
+    lastSyncError: null,
+    isChecking: false,
   });
+
+  const checkConnection = async (): Promise<{ ok: boolean; message: string }> => {
+    setSupabaseStatus(s => ({ ...s, isChecking: true }));
+    const result = await testSupabaseAppointmentsConnection();
+    setSupabaseStatus(s => ({
+      ...s,
+      isChecking: false,
+      lastSyncSuccess: result.ok,
+      lastSyncError: result.ok ? null : result.message,
+    }));
+    return { ok: result.ok, message: result.message };
+  };
+
+  const retrySyncBooking = async (bookingId: string): Promise<boolean> => {
+    const booking = eventBookings.find(b => b.id === bookingId);
+    if (!booking) return false;
+
+    try {
+      const res = await insertAppointmentBookingToSupabase(booking);
+      if (res.success) {
+        setEventBookings(prev =>
+          prev.map(b =>
+            b.id === bookingId
+              ? {
+                  ...b,
+                  supabaseSyncStatus: {
+                    success: true,
+                    table: res.table || 'appointments',
+                  },
+                }
+              : b
+          )
+        );
+        setSupabaseStatus(s => ({
+          ...s,
+          lastSyncedTable: res.table || 'appointments',
+          lastSyncSuccess: true,
+          lastSyncError: null,
+        }));
+        showToast(`Saved to Supabase appointments table! Ref: ${booking.referenceNumber}`);
+        return true;
+      } else {
+        setEventBookings(prev =>
+          prev.map(b =>
+            b.id === bookingId
+              ? {
+                  ...b,
+                  supabaseSyncStatus: {
+                    success: false,
+                    error: res.message,
+                    isPermissionError: res.isPermissionError,
+                  },
+                }
+              : b
+          )
+        );
+        setSupabaseStatus(s => ({
+          ...s,
+          lastSyncSuccess: false,
+          lastSyncError: res.message || 'Supabase permission denied',
+        }));
+        showToast(res.message || 'Supabase sync failed', 'error');
+        return false;
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to retry sync', 'error');
+      return false;
+    }
+  };
 
   // On mount: fetch existing data from Supabase if tables exist
   useEffect(() => {
@@ -420,24 +501,54 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       referenceNumber: refCode,
       ...data,
       status: 'received',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      supabaseSyncStatus: {
+        success: false,
+        isPermissionError: false,
+      }
     };
-
-    setEventBookings(prev => [newBooking, ...prev]);
 
     // Save appointment booking to Supabase
     try {
       const sbResult = await insertAppointmentBookingToSupabase(newBooking);
       if (sbResult.success) {
-        setSupabaseStatus(s => ({ ...s, lastSyncedTable: sbResult.table || 'appointments' }));
-        showToast(`Appointment booking saved to Supabase table (${sbResult.table}) with ref ${refCode}.`);
+        newBooking.supabaseSyncStatus = {
+          success: true,
+          table: sbResult.table || 'appointments',
+        };
+        setSupabaseStatus(s => ({
+          ...s,
+          lastSyncedTable: sbResult.table || 'appointments',
+          lastSyncSuccess: true,
+          lastSyncError: null
+        }));
+        showToast(`Appointment saved to Supabase (${sbResult.table || 'appointments'})! Ref: ${refCode}`);
       } else {
-        showToast(`Appointment booking ${refCode} received. Details logged locally and sent to concierge desk.`);
+        newBooking.supabaseSyncStatus = {
+          success: false,
+          error: sbResult.message,
+          isPermissionError: sbResult.isPermissionError,
+        };
+        setSupabaseStatus(s => ({
+          ...s,
+          lastSyncSuccess: false,
+          lastSyncError: sbResult.message || 'Permission denied in Supabase',
+        }));
+        if (sbResult.isPermissionError) {
+          showToast(`Supabase Error 42501: Permission denied for table 'appointments'.`, 'error');
+        } else {
+          showToast(`Appointment ${refCode} recorded. Note: Supabase insert failed: ${sbResult.message}`, 'info');
+        }
       }
-    } catch {
-      showToast(`Event booking ${refCode} received. Our celebrations team will contact you shortly.`);
+    } catch (err: any) {
+      newBooking.supabaseSyncStatus = {
+        success: false,
+        error: err?.message || 'Network error',
+      };
+      showToast(`Appointment ${refCode} recorded locally.`, 'info');
     }
 
+    setEventBookings(prev => [newBooking, ...prev]);
     return newBooking;
   };
 
@@ -538,7 +649,11 @@ export const RestaurantProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         showToast,
         menuItems,
         updateMenuItemPrice,
-        supabaseStatus
+        supabaseStatus: {
+          ...supabaseStatus,
+          checkConnection,
+          retrySyncBooking,
+        }
       }}
     >
       {children}

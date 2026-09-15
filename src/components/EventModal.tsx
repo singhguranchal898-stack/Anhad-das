@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useRestaurant } from '../context/RestaurantContext';
 import { EventType } from '../types';
-import { X, Calendar, Users, CheckCircle2, Sparkles, Phone, Mail, User } from 'lucide-react';
+import { X, Calendar, Users, CheckCircle2, Sparkles, Phone, Mail, User, AlertTriangle, Copy, CheckCheck, RefreshCw } from 'lucide-react';
+import { SUPABASE_FIX_SQL } from '../lib/supabase';
 
 export const EventModal: React.FC = () => {
-  const { isEventModalOpen, closeEventModal, eventModalType, requestEventBooking, user } = useRestaurant();
+  const { isEventModalOpen, closeEventModal, eventModalType, requestEventBooking, user, supabaseStatus } = useRestaurant();
 
   const [formData, setFormData] = useState({
     fullName: user?.name || '',
@@ -20,6 +21,8 @@ export const EventModal: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState<any | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   useEffect(() => {
     if (eventModalType) {
@@ -76,10 +79,64 @@ export const EventModal: React.FC = () => {
             <p className="text-xs text-[#8c8070] font-light">
               Our celebration director will review availability and connect with you at {confirmed.phone}.
             </p>
-            <div className="inline-flex items-center space-x-2 text-[10px] text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-3 py-1 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Synced to Supabase project <span className="font-mono text-[9px]">gcyobblqgyxnujfxgcfi</span></span>
-            </div>
+            {confirmed?.supabaseSyncStatus?.success ? (
+              <div className="inline-flex items-center space-x-2 text-[10px] text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-3 py-1 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Saved directly to Supabase table <span className="font-mono text-[9px] font-bold">appointments</span></span>
+              </div>
+            ) : (
+              <div className="p-3.5 bg-[#1a140e] border border-amber-500/40 rounded text-left space-y-2.5">
+                <div className="flex items-start space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="text-[11px] font-semibold text-amber-300 uppercase block">
+                      Supabase Permission Action Required (Error 42501)
+                    </span>
+                    <span className="text-[10px] text-[#baa995] leading-normal block">
+                      Table <span className="font-mono text-white">appointments</span> exists in project <span className="font-mono text-amber-200">gcyobblqgyxnujfxgcfi</span>, but needs INSERT permission for <span className="font-mono text-white">anon</span>.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-2 bg-[#0c0a08] border border-[#262017] rounded text-[10px] font-mono text-[#dcd2be]">
+                  GRANT ALL ON TABLE public.appointments TO anon, authenticated;
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(SUPABASE_FIX_SQL);
+                      setCopiedSql(true);
+                      setTimeout(() => setCopiedSql(false), 3000);
+                    }}
+                    className="flex-1 py-1.5 bg-[#c5a059] text-black font-semibold text-[10px] uppercase tracking-wider rounded-xs hover:bg-[#d8b569] flex items-center justify-center space-x-1"
+                  >
+                    {copiedSql ? <CheckCheck className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedSql ? 'Copied SQL' : 'Copy 1-Click SQL'}</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (!confirmed) return;
+                      setIsRetrying(true);
+                      const ok = await supabaseStatus.retrySyncBooking(confirmed.id);
+                      if (ok) {
+                        setConfirmed((prev: any) => ({
+                          ...prev,
+                          supabaseSyncStatus: { success: true, table: 'appointments' }
+                        }));
+                      }
+                      setIsRetrying(false);
+                    }}
+                    disabled={isRetrying}
+                    className="px-3 py-1.5 bg-[#252019] text-[#e0d6c4] border border-[#3e3425] text-[10px] uppercase tracking-wider rounded-xs flex items-center space-x-1 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isRetrying ? 'animate-spin' : ''}`} />
+                    <span>{isRetrying ? 'Retrying...' : 'Retry Save'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
             <button
               onClick={handleClose}
               className="w-full py-3 bg-[#c5a059] text-black font-semibold text-xs tracking-widest uppercase hover:bg-[#d8b569]"

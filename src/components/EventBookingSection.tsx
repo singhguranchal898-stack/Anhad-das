@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useRestaurant } from '../context/RestaurantContext';
 import { EventType } from '../types';
-import { Calendar, Clock, Users, Sparkles, CheckCircle2, Phone, Mail, User } from 'lucide-react';
+import { Calendar, Clock, Users, Sparkles, CheckCircle2, Phone, Mail, User, AlertTriangle, Copy, CheckCheck, RefreshCw } from 'lucide-react';
+import { SUPABASE_FIX_SQL } from '../lib/supabase';
 
 export const EventBookingSection: React.FC = () => {
-  const { requestEventBooking } = useRestaurant();
+  const { requestEventBooking, supabaseStatus } = useRestaurant();
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -20,6 +21,8 @@ export const EventBookingSection: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedBooking, setSubmittedBooking] = useState<any | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const eventTypes: EventType[] = [
     'Birthday',
@@ -119,11 +122,67 @@ export const EventBookingSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Supabase Status confirmation */}
-            <div className="inline-flex items-center space-x-2 text-[11px] text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-3.5 py-1.5 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Record recorded in Supabase project <span className="font-mono text-[10px]">gcyobblqgyxnujfxgcfi</span></span>
-            </div>
+            {/* Supabase Status confirmation / Action Required */}
+            {submittedBooking?.supabaseSyncStatus?.success ? (
+              <div className="inline-flex items-center space-x-2 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 px-4 py-2 rounded-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Saved directly to Supabase table <span className="font-mono text-[11px] font-bold text-emerald-300">appointments</span> ({supabaseStatus.projectId})</span>
+              </div>
+            ) : (
+              <div className="p-4 bg-[#1e1710] border border-[#d4af37]/40 rounded-sm text-left space-y-3 max-w-lg mx-auto">
+                <div className="flex items-start space-x-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <h5 className="text-xs font-semibold text-amber-300 uppercase tracking-wider">
+                      Supabase Permission Action Required (Error 42501)
+                    </h5>
+                    <p className="text-[11px] text-[#c9bea9] leading-relaxed">
+                      Your Supabase table <span className="font-mono text-white">appointments</span> exists in project <span className="font-mono text-amber-200">gcyobblqgyxnujfxgcfi</span>, but PostgreSQL is rejecting inserts because the <span className="font-mono text-white">anon</span> role does not have write permissions.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-2.5 bg-[#0e0c0a] border border-[#2b251c] rounded text-[11px] font-mono text-[#dcd2be] space-y-1">
+                  <div className="text-[10px] text-[#8e8170] uppercase">1. Run in Supabase SQL Editor:</div>
+                  <div className="text-amber-200">GRANT ALL ON TABLE public.appointments TO anon, authenticated;</div>
+                  <div className="text-amber-200">ALTER TABLE public.appointments DISABLE ROW LEVEL SECURITY;</div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(SUPABASE_FIX_SQL);
+                      setCopiedSql(true);
+                      setTimeout(() => setCopiedSql(false), 3000);
+                    }}
+                    className="px-3.5 py-1.5 bg-[#c5a059] text-black font-semibold text-xs uppercase tracking-wider rounded-xs hover:bg-[#d8b569] flex items-center space-x-1.5 transition-colors"
+                  >
+                    {copiedSql ? <CheckCheck className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedSql ? 'SQL Copied!' : 'Copy 1-Click SQL Fix'}</span>
+                  </button>
+
+                  <button
+                    onClick={async () => {
+                      if (!submittedBooking) return;
+                      setIsRetrying(true);
+                      const ok = await supabaseStatus.retrySyncBooking(submittedBooking.id);
+                      if (ok) {
+                        setSubmittedBooking((prev: any) => ({
+                          ...prev,
+                          supabaseSyncStatus: { success: true, table: 'appointments' }
+                        }));
+                      }
+                      setIsRetrying(false);
+                    }}
+                    disabled={isRetrying}
+                    className="px-3.5 py-1.5 bg-[#252019] text-[#e0d6c4] border border-[#3e3425] hover:border-[#c5a059] text-xs uppercase tracking-wider rounded-xs flex items-center space-x-1.5 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRetrying ? 'animate-spin' : ''}`} />
+                    <span>{isRetrying ? 'Retrying...' : 'Retry Supabase Save'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="pt-2">
               <button
